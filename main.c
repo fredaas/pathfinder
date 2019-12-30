@@ -12,7 +12,11 @@
 #include <GL/gl.h>
 #include <GL/glu.h>
 
-enum { N_OPEN, N_CLOSED, N_IDLE };
+#define NIL -1
+
+void init_nodes(void);
+
+enum { N_OPEN, N_CLOSED, N_EXPANDABLE, N_OBSTACLE };
 
 enum {
     MOUSE_LEFT,
@@ -26,7 +30,6 @@ struct Node {
     int f;
     int h;
     int g;
-    int t;
     int s;
     int i;
     Node *parent;
@@ -47,14 +50,12 @@ int window_w = 1500,
     window_h = 1000;
 
 enum {
-    S_MODEL,
-    S_PREPARE,
+    S_EDIT,
     S_PLAY,
     S_PAUSE,
-    S_DONE
 };
 
-int state = S_MODEL;
+int state = S_EDIT;
 
 /* Grid coefficient */
 #define H 20
@@ -100,10 +101,10 @@ GLFWwindow* window;
 
 int *model = NULL;
 
-int index_j,
-    index_i;
+/* Source and sink indices */
+int index_i, index_j;
 
-void clear_model(void);
+void clear_obstacles(void);
 
 double walltime(void)
 {
@@ -131,10 +132,16 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action,
             glfwSetWindowShouldClose(window, GLFW_TRUE);
             break;
         case GLFW_KEY_C:
-            clear_model();
+            clear_obstacles();
+            state = S_EDIT;
             break;
         case GLFW_KEY_R:
-            state = S_PREPARE;
+            init_nodes();
+            state = S_PLAY;
+            break;
+        case GLFW_KEY_P:
+            if (state == S_PLAY || state == S_PAUSE)
+                state = (state == S_PAUSE ? S_PLAY : S_PAUSE);
             break;
         }
     }
@@ -229,9 +236,7 @@ int is_mouse_down(int key)
  ******************************************************************************/
 
 
-enum { MODEL_DRAW, MODEL_MOVE };
-
-void clear_model(void)
+void clear_obstacles(void)
 {
     for (int i = 0; i < NUM_SQUARES; i++)
     {
@@ -277,7 +282,7 @@ void update_model(void)
                 index_j = k;
         }
     }
-    /* Draw/clear blocks */
+    /* Draw blocks */
     else
     {
         if (is_mouse_down(MOUSE_LEFT))
@@ -307,34 +312,44 @@ void draw_view(void)
 {
     for (int i = 0; i < NUM_SQUARES; i++)
     {
-        if (model[i] == T_BLACK)
+        int tile_type = model[i];
+
+        /* Draw model */
+        if (tile_type == T_BLACK)
         {
             glColor3f(0.2, 0.2, 0.2);
             rect2i(i);
         }
-        else if (model[i] == T_SOURCE)
+        else if (tile_type == T_SOURCE)
         {
             glColor3f(1.0, 0.0, 0.0);
             rect2i(i);
         }
-        else if (model[i] == T_SINK)
+        else if (tile_type == T_SINK)
         {
             glColor3f(0.0, 1.0, 0.0);
             rect2i(i);
         }
-        else if (model[i] == T_WHITE)
+        else if (tile_type == T_WHITE)
         {
             glColor3f(1.0, 1.0, 1.0);
             rect2i(i);
         }
-        if (state == S_PLAY)
+
+        if (tile_type == T_SOURCE || tile_type == T_SINK)
+            continue;
+
+        int node_state = nodes[i].s;
+
+        /* Draw path search */
+        if (state == S_PLAY || state == S_PAUSE)
         {
-            if (nodes[i].s == N_CLOSED)
+            if (node_state == N_CLOSED)
             {
                 glColor3f(0.0, 0.6, 0.5);
                 rect2i(i);
             }
-            if (nodes[i].s == N_OPEN)
+            if (node_state == N_OPEN)
             {
                 glColor3f(0.5, 1.0, 0.5);
                 rect2i(i);
@@ -576,8 +591,7 @@ void get_neighbors(Node *node, Node **neighbors)
 
 void expand(Node *u)
 {
-    if (u->t == T_WHITE)
-        u->s = N_CLOSED;
+    u->s = N_CLOSED;
 
     Node *neighbors[9] = { NULL };
     get_neighbors(u, neighbors);
@@ -586,10 +600,8 @@ void expand(Node *u)
     int i = 0;
     while ((v = neighbors[i++]) != NULL)
     {
-        if (v->t != T_WHITE)
-             continue;
-        if (v->s == N_CLOSED)
-             continue;
+        if (v->s == N_OBSTACLE || v->s == N_CLOSED)
+            continue;
         if (u->g + v->w < v->g)
         {
             v->g = u->g + v->w;
@@ -612,14 +624,14 @@ void init_nodes(void)
         int sy = i / NUM_SQUARES_X;
         int tx = index_j % NUM_SQUARES_X;
         int ty = index_j / NUM_SQUARES_X;
+        int s = (model[i] == T_BLACK ? N_OBSTACLE : N_EXPANDABLE);
         nodes[i] = (Node) {
             .w = 1,
             .f = INT_MAX,
             .g = INT_MAX,
             .h = manhattan(tx - sx, ty - sy),
             .i = i,
-            .t = model[i],
-            .s = N_IDLE,
+            .s = s,
             .parent = NULL
         };
     }
@@ -627,6 +639,23 @@ void init_nodes(void)
     Node *u = &nodes[index_i];
     u->g = 0;
     expand(u);
+}
+
+int * get_path(Node *sink)
+{
+    int *path = (int *)malloc(NUM_SQUARES * sizeof(int));
+    int i = 0;
+
+    Node *node = sink;
+    while (node != NULL)
+    {
+        path[i++] = node->i;
+        node = node->parent;
+    }
+
+    path[i] = NIL;
+
+    return (int *)realloc(path, (i + 1) * sizeof(int));
 }
 
 
@@ -721,8 +750,33 @@ int main(int argc, char **argv)
 
     initialize();
 
+    Node *u = NULL;
+    int *path = NULL;
+
+    /* TODO: Draw path as lines */
+
     while (!glfwWindowShouldClose(window))
     {
+        switch (state)
+        {
+        case S_EDIT:
+            update_model();
+            break;
+        case S_PLAY:
+            if (open.size > 0)
+            {
+                u = extract(&open);
+                if (model[u->i] == T_SINK)
+                {
+                    path = get_path(u);
+                    state = S_PAUSE;
+                    break;
+                }
+                expand(u);
+            }
+            break;
+        }
+
         glfwGetFramebufferSize(window, &window_w, &window_h);
         glViewport(0, 0, window_w, window_h);
 
@@ -731,28 +785,17 @@ int main(int argc, char **argv)
         gluOrtho2D(0.0, window_w, window_h, 0);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        switch (state)
+        draw_view();
+
+        if (path != NULL)
         {
-        case S_MODEL:
-            update_model();
-            draw_view();
-            break;
-        case S_PREPARE:
-            init_nodes();
-            state = S_PLAY;
-            break;
-        case S_PLAY:
-            if (open.size > 0)
+            glColor3f(0, 0, 1);
+            int i = 0;
+            while (path[i] != NIL)
             {
-                Node *u = extract(&open);
-                expand(u);
+                rect2i(path[i]);
+                i++;
             }
-            draw_view();
-            break;
-        case S_PAUSE:
-            break;
-        case S_DONE:
-            break;
         }
 
         glfwSwapBuffers(window);
