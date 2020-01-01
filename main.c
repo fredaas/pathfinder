@@ -16,6 +16,8 @@
 
 void init_nodes(void);
 
+int *path = NULL;
+
 enum { N_OPEN, N_CLOSED, N_EXPANDABLE, N_OBSTACLE };
 
 enum {
@@ -641,9 +643,9 @@ void init_nodes(void)
     expand(u);
 }
 
-int * get_path(Node *sink)
+void build_path(Node *sink)
 {
-    int *path = (int *)malloc(NUM_SQUARES * sizeof(int));
+    path = (int *)malloc(NUM_SQUARES * sizeof(int));
     int i = 0;
 
     Node *node = sink;
@@ -655,7 +657,7 @@ int * get_path(Node *sink)
 
     path[i] = NIL;
 
-    return (int *)realloc(path, (i + 1) * sizeof(int));
+    path = (int *)realloc(path, (i + 1) * sizeof(int));
 }
 
 
@@ -665,6 +667,33 @@ int * get_path(Node *sink)
  *
  ******************************************************************************/
 
+
+void draw_path(void)
+{
+    glColor3f(1, 0, 0);
+    glLineWidth(2.5f);
+
+    int k = 0;
+
+    glBegin(GL_LINES);
+
+    while (1)
+    {
+        int i = path[k];
+        int j = path[k + 1];
+        if (i == NIL || j == NIL)
+            break;
+        k++;
+        float sx = (i % NUM_SQUARES_X) * H + H / 2;
+        float sy = (i / NUM_SQUARES_X) * H + H / 2;
+        float tx = (j % NUM_SQUARES_X) * H + H / 2;
+        float ty = (j / NUM_SQUARES_X) * H + H / 2;
+        glVertex2f(sx, sy);
+        glVertex2f(tx, ty);
+    }
+
+    glEnd();
+}
 
 void center_window(GLFWwindow *window)
 {
@@ -751,9 +780,6 @@ int main(int argc, char **argv)
     initialize();
 
     Node *u = NULL;
-    int *path = NULL;
-
-    /* TODO: Draw path as lines */
 
     while (!glfwWindowShouldClose(window))
     {
@@ -768,7 +794,7 @@ int main(int argc, char **argv)
                 u = extract(&open);
                 if (model[u->i] == T_SINK)
                 {
-                    path = get_path(u);
+                    build_path(u);
                     state = S_PAUSE;
                     break;
                 }
@@ -782,21 +808,13 @@ int main(int argc, char **argv)
 
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
-        gluOrtho2D(0.0, window_w, window_h, 0);
+        gluOrtho2D(0, window_w, window_h, 0);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         draw_view();
 
         if (path != NULL)
-        {
-            glColor3f(0, 0, 1);
-            int i = 0;
-            while (path[i] != NIL)
-            {
-                rect2i(path[i]);
-                i++;
-            }
-        }
+            draw_path();
 
         glfwSwapBuffers(window);
         glfwPollEvents();
