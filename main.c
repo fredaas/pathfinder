@@ -37,7 +37,7 @@ struct Node {
     Node *parent;
 };
 
-Node *nodes;
+Node *nodes = NULL;
 
 int keys[256] = { 0 };
 
@@ -53,7 +53,7 @@ int window_w = 1500,
 
 enum {
     S_EDIT,
-    S_PLAY,
+    S_RUN,
     S_PAUSE,
 };
 
@@ -107,6 +107,7 @@ int *model = NULL;
 int index_i, index_j;
 
 void clear_obstacles(void);
+void clear_search(void);
 
 double walltime(void)
 {
@@ -130,20 +131,22 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action,
     {
         switch (key)
         {
-        case GLFW_KEY_Q:
-            glfwSetWindowShouldClose(window, GLFW_TRUE);
-            break;
         case GLFW_KEY_C:
-            clear_obstacles();
+            if (GLFW_MOD_SHIFT & mods)
+                clear_obstacles();
+            clear_search();
             state = S_EDIT;
             break;
         case GLFW_KEY_R:
             init_nodes();
-            state = S_PLAY;
+            state = S_RUN;
             break;
         case GLFW_KEY_P:
-            if (state == S_PLAY || state == S_PAUSE)
-                state = (state == S_PAUSE ? S_PLAY : S_PAUSE);
+            if (state == S_RUN || state == S_PAUSE)
+                state = (state == S_PAUSE ? S_RUN : S_PAUSE);
+            break;
+        case GLFW_KEY_Q:
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
             break;
         }
     }
@@ -246,12 +249,19 @@ void clear_obstacles(void)
         if (q != T_SOURCE && q != T_SINK)
             model[i] = T_WHITE;
     }
+
+}
+
+void clear_search(void)
+{
+    free(path);
+    path = NULL;
 }
 
 void update_model(void)
 {
     static int j = 0;
-    static int k = -1;
+    static int k = NIL;
 
     j = index2f(mx, my);
 
@@ -266,11 +276,11 @@ void update_model(void)
     /* Release fixture index */
     else if (is_mouse_released(MOUSE_LEFT))
     {
-        k = -1;
+        k = NIL;
     }
 
     /* Move fixture index */
-    if (k >= 0)
+    if (k != NIL)
     {
         if (*q == T_WHITE)
         {
@@ -310,6 +320,33 @@ void update_model(void)
  ******************************************************************************/
 
 
+void draw_path(void)
+{
+    glColor3f(1, 1, 0);
+    glLineWidth(2.5f);
+
+    int k = 0;
+
+    glBegin(GL_LINES);
+
+    while (1)
+    {
+        int i = path[k];
+        int j = path[k + 1];
+        if (i == NIL || j == NIL)
+            break;
+        k++;
+        float sx = (i % NUM_SQUARES_X) * H + H / 2;
+        float sy = (i / NUM_SQUARES_X) * H + H / 2;
+        float tx = (j % NUM_SQUARES_X) * H + H / 2;
+        float ty = (j / NUM_SQUARES_X) * H + H / 2;
+        glVertex2f(sx, sy);
+        glVertex2f(tx, ty);
+    }
+
+    glEnd();
+}
+
 void draw_view(void)
 {
     for (int i = 0; i < NUM_SQUARES; i++)
@@ -341,20 +378,19 @@ void draw_view(void)
         if (tile_type == T_SOURCE || tile_type == T_SINK)
             continue;
 
-        int node_state = nodes[i].s;
-
-        /* Draw path search */
-        if (state == S_PLAY || state == S_PAUSE)
+        /* Draw search */
+        if (state == S_RUN || state == S_PAUSE)
         {
-            if (node_state == N_CLOSED)
+            switch (nodes[i].s)
             {
+            case N_OPEN:
                 glColor3f(0.0, 0.6, 0.5);
                 rect2i(i);
-            }
-            if (node_state == N_OPEN)
-            {
-                glColor3f(0.5, 1.0, 0.5);
+                break;
+            case N_CLOSED:
+                glColor3f(0.5, 1.0, 0.8);
                 rect2i(i);
+                break;
             }
         }
     }
@@ -668,33 +704,6 @@ void build_path(Node *sink)
  ******************************************************************************/
 
 
-void draw_path(void)
-{
-    glColor3f(1, 0, 0);
-    glLineWidth(2.5f);
-
-    int k = 0;
-
-    glBegin(GL_LINES);
-
-    while (1)
-    {
-        int i = path[k];
-        int j = path[k + 1];
-        if (i == NIL || j == NIL)
-            break;
-        k++;
-        float sx = (i % NUM_SQUARES_X) * H + H / 2;
-        float sy = (i / NUM_SQUARES_X) * H + H / 2;
-        float tx = (j % NUM_SQUARES_X) * H + H / 2;
-        float ty = (j / NUM_SQUARES_X) * H + H / 2;
-        glVertex2f(sx, sy);
-        glVertex2f(tx, ty);
-    }
-
-    glEnd();
-}
-
 void center_window(GLFWwindow *window)
 {
     GLFWmonitor *monitor = glfwGetPrimaryMonitor();
@@ -758,7 +767,8 @@ void initialize(void)
     glEnable(GL_MULTISAMPLE);
     glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 
-    /* Configure model */
+    /* Allocate model and node memory and place source and sink */
+
     model = (int *)calloc(NUM_SQUARES, sizeof(int));
 
     int x, y;
@@ -769,7 +779,6 @@ void initialize(void)
     index_i = index2i(x - 4, y);
     index_j = index2i(x + 4, y);
 
-    /* Configure nodes */
     nodes = (Node *)malloc(NUM_SQUARES * sizeof(Node));
 }
 
@@ -779,8 +788,6 @@ int main(int argc, char **argv)
 
     initialize();
 
-    Node *u = NULL;
-
     while (!glfwWindowShouldClose(window))
     {
         switch (state)
@@ -788,10 +795,10 @@ int main(int argc, char **argv)
         case S_EDIT:
             update_model();
             break;
-        case S_PLAY:
+        case S_RUN:
             if (open.size > 0)
             {
-                u = extract(&open);
+                Node *u = extract(&open);
                 if (model[u->i] == T_SINK)
                 {
                     build_path(u);
@@ -812,7 +819,6 @@ int main(int argc, char **argv)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         draw_view();
-
         if (path != NULL)
             draw_path();
 
