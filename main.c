@@ -28,10 +28,10 @@ enum {
 typedef struct Node Node;
 
 struct Node {
-    int w;
-    int f;
-    int h;
-    int g;
+    float w;
+    float f;
+    float h;
+    float g;
     int s;
     int i;
     Node *parent;
@@ -667,7 +667,7 @@ void init_nodes(void)
             .w = 1,
             .f = INT_MAX,
             .g = INT_MAX,
-            .h = manhattan(tx - sx, ty - sy),
+            .h = euclidean(tx - sx, ty - sy),
             .i = i,
             .s = s,
             .parent = NULL
@@ -785,6 +785,18 @@ void initialize(void)
 int main(int argc, char **argv)
 {
     srand(time(NULL));
+
+    printf(
+        "Keys:\n"
+        "     'left mouse'  Remove obstacles\n"
+        "     'rigth mouse' Place obstacles\n"
+        "     'ctrl+c'      Clear everything\n"
+        "     'c'           Clear search\n"
+        "     'q'           Quit\n"
+        "     'r'           Run\n"
+        "     'p'           Pause\n"
+    );
+
 
     initialize();
 
