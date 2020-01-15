@@ -12,6 +12,7 @@
 #include <GL/gl.h>
 #include <GL/glu.h>
 
+#define PI (float)3.141592654
 #define NIL -1
 
 void init_nodes(void);
@@ -90,6 +91,25 @@ int state = S_EDIT;
     float x = ((i) % NUM_SQUARES_X) * H; \
     float y = ((i) / NUM_SQUARES_X) * H; \
     glRectf(x, y, x + H, y + H); \
+} while (0)
+
+void glCirclef(float x, float y, float r){
+    int n = 20; /* Number of triangles */
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(x, y); /* Circle center */
+    for(int i = 0; i <= n; i++) {
+        glVertex2f(
+            x + (r * cos(i * 2 * PI / n)),
+            y + (r * sin(i * 2 * PI / n))
+        );
+    }
+    glEnd();
+}
+
+#define circle2i(i) do { \
+    float x = ((i) % NUM_SQUARES_X) * H + H / 2; \
+    float y = ((i) / NUM_SQUARES_X) * H + H / 2; \
+    glCirclef(x, y, 9); \
 } while (0)
 
 enum {
