@@ -422,6 +422,20 @@ struct Bucket {
     int id;
 };
 
+void destroy(List *list)
+{
+    Bucket *bucket = list->tail;
+    while (bucket != NULL)
+    {
+        Bucket *current = bucket;
+        bucket = bucket->prev;
+        free(current);
+    }
+    list->head = NULL;
+    list->tail = NULL;
+    list->size = 0;
+}
+
 /* Appends a node to the list */
 void append(List *list, Node *node)
 {
@@ -656,6 +670,8 @@ void expand(Node *u)
 
 void init_nodes(void)
 {
+    destroy(&open);
+
     for (int i = 0; i < NUM_SQUARES; i++)
     {
         int sx = i % NUM_SQUARES_X;
