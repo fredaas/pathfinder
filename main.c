@@ -12,45 +12,35 @@
 #include <GL/gl.h>
 #include <GL/glu.h>
 
-#define PI (float)3.141592654
-#define NIL -1
+#include "astar.h"
+#include "list.h"
 
-void init_nodes(void);
-
+/* Extern definitions */
+Node *nodes = NULL;
 int *path = NULL;
+int index_i = 0;
+int index_j = 0;
+int window_h = 1000;
+int window_w = 1500;
 
-enum { N_OPEN, N_CLOSED, N_EXPANDABLE, N_OBSTACLE };
+/* Draw square at index */
+#define rect2i(i) do { \
+    float x = ((i) % NUM_SQUARES_X) * H; \
+    float y = ((i) / NUM_SQUARES_X) * H; \
+    glRectf(x, y, x + H, y + H); \
+} while (0)
+
+/* Draw circle at index */
+#define circle2i(i) do { \
+    float x = ((i) % NUM_SQUARES_X) * H + H / 2; \
+    float y = ((i) / NUM_SQUARES_X) * H + H / 2; \
+    glCirclef(x, y, 9); \
+} while (0)
 
 enum {
     MOUSE_LEFT,
     MOUSE_RIGHT
 };
-
-typedef struct Node Node;
-
-struct Node {
-    float w;
-    float f;
-    float h;
-    float g;
-    int s;
-    int i;
-    Node *parent;
-};
-
-Node *nodes = NULL;
-
-int keys[256] = { 0 };
-
-int mouse_down[2];
-int mouse_released[2];
-int mouse_pressed[2];
-
-float mx = 0.0,
-      my = 0.0;
-
-int window_w = 1500,
-    window_h = 1000;
 
 enum {
     S_EDIT,
@@ -60,38 +50,20 @@ enum {
 
 int state = S_EDIT;
 
-/* Grid coefficient */
-#define H 20
-#define NUM_SQUARES (window_w * window_h / (H * H))
-#define NUM_SQUARES_X (window_w / H)
-#define NUM_SQUARES_Y (window_h / H)
+int mouse_down[2];
+int mouse_released[2];
+int mouse_pressed[2];
 
-/* Translates screen coordinates (x, y) into H-index */
-#define index2f(x, y) \
-   ((int)((y) / H) * NUM_SQUARES_X + (int)((x) / H))
+float mx = 0.0,
+      my = 0.0;
 
-/* Translates H-coordinates (x, y) into H-index */
-#define index2i(x, y) \
-    (y) * NUM_SQUARES_X + (x)
+GLFWwindow *window = NULL;
 
-/* Returns the model element at screen coordinates (x, y) */
-#define model2f(x, y) \
-    model[(int)((y) / H) * NUM_SQUARES_X + (int)((x) / H)]
+int *model = NULL;
 
-/* Returns the model element at screen H-coordinates (x, y) */
-#define model2i(x, y) \
-    model[(y) * NUM_SQUARES_X + (x)]
-
-/* Returns the node element at screen H-coordinates (x, y) */
-#define node2i(x, y) \
-    nodes[(y) * NUM_SQUARES_X + (x)]
-
-/* Draw square at index */
-#define rect2i(i) do { \
-    float x = ((i) % NUM_SQUARES_X) * H; \
-    float y = ((i) / NUM_SQUARES_X) * H; \
-    glRectf(x, y, x + H, y + H); \
-} while (0)
+void clear_obstacles(void);
+void clear_search(void);
+void init_nodes(int *model);
 
 void glCirclef(float x, float y, float r){
     int n = 20; /* Number of triangles */
@@ -105,29 +77,6 @@ void glCirclef(float x, float y, float r){
     }
     glEnd();
 }
-
-#define circle2i(i) do { \
-    float x = ((i) % NUM_SQUARES_X) * H + H / 2; \
-    float y = ((i) / NUM_SQUARES_X) * H + H / 2; \
-    glCirclef(x, y, 9); \
-} while (0)
-
-enum {
-    T_WHITE,
-    T_BLACK,
-    T_SOURCE,
-    T_SINK,
-};
-
-GLFWwindow* window;
-
-int *model = NULL;
-
-/* Source and sink indices */
-int index_i, index_j;
-
-void clear_obstacles(void);
-void clear_search(void);
 
 double walltime(void)
 {
@@ -158,7 +107,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action,
             state = S_EDIT;
             break;
         case GLFW_KEY_R:
-            init_nodes();
+            init_nodes(model);
             state = S_RUN;
             break;
         case GLFW_KEY_P:
@@ -414,322 +363,6 @@ void draw_view(void)
             }
         }
     }
-}
-
-
-/*******************************************************************************
- *
- * List
- *
- ******************************************************************************/
-
-
-typedef struct Bucket Bucket;
-
-typedef struct List List;
-
-/* List orientation: tail -> 0 <-> 1 <-> ... <-> N <- head */
-struct List {
-    Bucket *head;
-    Bucket *tail;
-    int size;
-} open;
-
-struct Bucket {
-    Node *node;
-    Bucket *next;
-    Bucket *prev;
-    int id;
-};
-
-void destroy(List *list)
-{
-    Bucket *bucket = list->tail;
-    while (bucket != NULL)
-    {
-        Bucket *current = bucket;
-        bucket = bucket->prev;
-        free(current);
-    }
-    list->head = NULL;
-    list->tail = NULL;
-    list->size = 0;
-}
-
-/* Appends a node to the list */
-void append(List *list, Node *node)
-{
-    static int i = 0;
-    Bucket *bucket = (Bucket *)malloc(sizeof(Bucket));
-    bucket->node = node;
-    bucket->next = NULL;
-    bucket->prev = NULL;
-    bucket->id = i++;
-    if (list->head == NULL)
-    {
-        list->head = bucket;
-        list->tail = bucket;
-    }
-    else
-    {
-        list->head->next = bucket;
-        bucket->prev = list->head;
-        list->head = bucket;
-    }
-    list->size++;
-}
-
-/* Returns the node indetified by 'index' and removes the bucket from the list */
-Node * slice_index(List *list, int index)
-{
-    Bucket *bucket = list->tail;
-
-    int i = 0;
-
-    /* Fetch bucket */
-    while (bucket != NULL)
-    {
-        if (index == i++)
-            break;
-        bucket = bucket->next;
-    }
-
-    if (list->head == NULL || bucket == NULL)
-        return NULL;
-
-    list->size--;
-
-    /* Remove bucket */
-    if (list->head == bucket)
-        list->head = bucket->prev;
-    if (list->tail == bucket)
-        list->tail = bucket->next;
-    if (bucket->next != NULL)
-        bucket->next->prev = bucket->prev;
-    if (bucket->prev != NULL)
-        bucket->prev->next = bucket->next;
-
-    Node *node = bucket->node;
-
-    free(bucket);
-
-    return node;
-}
-
-/*  Returns the node identified by 'bucket' and removes the bucket from the list */
-Node * slice_bucket(List *list, Bucket *bucket)
-{
-    if (list->head == NULL || bucket == NULL)
-        return NULL;
-
-    list->size--;
-
-    /* Remove bucket */
-    if (list->head == bucket)
-        list->head = bucket->prev;
-    if (list->tail == bucket)
-        list->tail = bucket->next;
-    if (bucket->next != NULL)
-        bucket->next->prev = bucket->prev;
-    if (bucket->prev != NULL)
-        bucket->prev->next = bucket->next;
-
-    Node *node = bucket->node;
-
-    free(bucket);
-
-    return node;
-}
-
-int contains(List *list, Node *node)
-{
-    Bucket *bucket = list->tail;
-    while (bucket != NULL)
-    {
-        if (bucket->node->i == node->i)
-            return 1;
-        bucket = bucket->next;
-    }
-    return 0;
-}
-
-void print_list(List *list)
-{
-    Bucket *bucket = list->tail;
-    while (bucket != NULL)
-    {
-        printf("%d\n", bucket->id);
-        bucket = bucket->next;
-    }
-}
-
-void test_list(void)
-{
-    for (int i = 0; i < 3; i++)
-        append(&open, (Node *)malloc(sizeof(Node)));
-
-    printf("[LIST TEST: DELETE]\n");
-
-    print_list(&open);
-    printf("%p %p %d\n", open.head, open.tail, open.size); printf("---\n");
-
-    slice_index(&open, 0);
-    print_list(&open);
-    printf("%p %p %d\n", open.head, open.tail, open.size); printf("---\n");
-
-    slice_index(&open, 0);
-    print_list(&open);
-    printf("%p %p %d\n", open.head, open.tail, open.size); printf("---\n");
-
-    slice_index(&open, 0);
-    print_list(&open);
-    printf("%p %p %d\n", open.head, open.tail, open.size); printf("---\n");
-
-    slice_index(&open, 0);
-    print_list(&open);
-    printf("%p %p %d\n", open.head, open.tail, open.size); printf("---\n");
-
-    printf("[LIST TEST: INSERT]\n");
-
-    append(&open, (Node *)malloc(sizeof(Node)));
-    print_list(&open);
-    printf("%p %p %d\n", open.head, open.tail, open.size); printf("---\n");
-
-    append(&open, (Node *)malloc(sizeof(Node)));
-    print_list(&open);
-    printf("%p %p %d\n", open.head, open.tail, open.size); printf("---\n");
-
-    append(&open, (Node *)malloc(sizeof(Node)));
-    print_list(&open);
-    printf("%p %p %d\n", open.head, open.tail, open.size); printf("---\n");
-}
-
-
-/*******************************************************************************
- *
- * A*
- *
- ******************************************************************************/
-
-
-#define max(a, b) ((a) > (b) ? (a) : (b))
-
-float manhattan(int dx, int dy)
-{
-    return abs(dx) + abs(dy);
-}
-
-float euclidean(int dx, int dy)
-{
-    return sqrt(dx * dx + dy * dy);
-}
-
-float chebyshev(int dx, int dy)
-{
-    return max(dx, dy);
-}
-
-Node * extract(List *list)
-{
-    Bucket *u = list->tail;
-    Bucket *v = list->tail;
-    while (v != NULL)
-    {
-        if (v->node->f < u->node->f)
-            u = v;
-        v = v->next;
-    }
-    return slice_bucket(list, u);
-}
-
-void get_neighbors(Node *node, Node **neighbors)
-{
-    int x = node->i % NUM_SQUARES_X;
-    int y = node->i / NUM_SQUARES_X;
-    int j = 0;
-    for (int i = 0; i < 9; i++)
-    {
-        if (i == 4)
-            continue;
-        int dy = (i / 3) - 1;
-        int dx = (i % 3) - 1;
-        if (x + dx < 0 || x + dx > NUM_SQUARES_X - 1)
-            continue;
-        if (y + dy < 0 || y + dy > NUM_SQUARES_Y - 1)
-            continue;
-        neighbors[j++] = &node2i(x + dx, y + dy);
-    }
-}
-
-void expand(Node *u)
-{
-    u->s = N_CLOSED;
-
-    Node *neighbors[9] = { NULL };
-    get_neighbors(u, neighbors);
-
-    Node *v;
-    int i = 0;
-    while ((v = neighbors[i++]) != NULL)
-    {
-        if (v->s == N_OBSTACLE || v->s == N_CLOSED)
-            continue;
-        if (u->g + v->w < v->g)
-        {
-            v->g = u->g + v->w;
-            v->f = v->g + v->h;
-            v->parent = u;
-        }
-        if (v->s != N_OPEN)
-        {
-            v->s = N_OPEN;
-            append(&open, v);
-        }
-    }
-}
-
-void init_nodes(void)
-{
-    destroy(&open);
-
-    for (int i = 0; i < NUM_SQUARES; i++)
-    {
-        int sx = i % NUM_SQUARES_X;
-        int sy = i / NUM_SQUARES_X;
-        int tx = index_j % NUM_SQUARES_X;
-        int ty = index_j / NUM_SQUARES_X;
-        int s = (model[i] == T_BLACK ? N_OBSTACLE : N_EXPANDABLE);
-        nodes[i] = (Node) {
-            .w = 1,
-            .f = INT_MAX,
-            .g = INT_MAX,
-            .h = euclidean(tx - sx, ty - sy),
-            .i = i,
-            .s = s,
-            .parent = NULL
-        };
-    }
-
-    Node *u = &nodes[index_i];
-    u->g = 0;
-    expand(u);
-}
-
-void build_path(Node *sink)
-{
-    path = (int *)malloc(NUM_SQUARES * sizeof(int));
-    int i = 0;
-
-    Node *node = sink;
-    while (node != NULL)
-    {
-        path[i++] = node->i;
-        node = node->parent;
-    }
-
-    path[i] = NIL;
-
-    path = (int *)realloc(path, (i + 1) * sizeof(int));
 }
 
 
