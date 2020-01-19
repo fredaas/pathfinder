@@ -24,18 +24,35 @@ int window_h = 1000;
 int window_w = 1500;
 
 /* Draw square at index */
-#define rect2i(i) do { \
+#define recti(i) do { \
     float x = ((i) % NUM_SQUARES_X) * H; \
     float y = ((i) / NUM_SQUARES_X) * H; \
     glRectf(x, y, x + H, y + H); \
 } while (0)
 
 /* Draw circle at index */
-#define circle2i(i) do { \
+#define circlei(i) do { \
     float x = ((i) % NUM_SQUARES_X) * H + H / 2; \
     float y = ((i) / NUM_SQUARES_X) * H + H / 2; \
     glCirclef(x, y, 9); \
 } while (0)
+
+#define draw_shape(i) do { \
+    switch (shape) \
+    { \
+    case SHAPE_RECT: \
+        recti(i); \
+        break; \
+    case SHAPE_CIRCLE: \
+        circlei(i); \
+        break; \
+    } \
+} while (0)
+
+enum {
+    SHAPE_RECT,
+    SHAPE_CIRCLE
+};
 
 enum {
     MOUSE_LEFT,
@@ -47,6 +64,8 @@ enum {
     S_RUN,
     S_PAUSE,
 };
+
+int shape = SHAPE_RECT;
 
 int state = S_EDIT;
 
@@ -326,22 +345,22 @@ void draw_view(void)
         if (tile_type == T_BLACK)
         {
             glColor3f(0.2, 0.2, 0.2);
-            rect2i(i);
+            draw_shape(i);
         }
         else if (tile_type == T_SOURCE)
         {
             glColor3f(1.0, 0.0, 0.0);
-            rect2i(i);
+            draw_shape(i);
         }
         else if (tile_type == T_SINK)
         {
             glColor3f(0.0, 1.0, 0.0);
-            rect2i(i);
+            draw_shape(i);
         }
         else if (tile_type == T_WHITE)
         {
             glColor3f(1.0, 1.0, 1.0);
-            rect2i(i);
+            draw_shape(i);
         }
 
         if (tile_type == T_SOURCE || tile_type == T_SINK)
@@ -354,11 +373,11 @@ void draw_view(void)
             {
             case N_OPEN:
                 glColor3f(0.0, 0.6, 0.5);
-                rect2i(i);
+                draw_shape(i);
                 break;
             case N_CLOSED:
                 glColor3f(0.5, 1.0, 0.8);
-                rect2i(i);
+                draw_shape(i);
                 break;
             }
         }
